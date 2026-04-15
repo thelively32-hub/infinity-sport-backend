@@ -1,7 +1,7 @@
 // db/sync.js
 // Fetches games from ESPN and stores in PostgreSQL
 
-const pool = require('./index');
+const pool = require('../db/index');
 const NodeCache = require('node-cache');
 const cache = new NodeCache({ stdTTL: 300 });
 
