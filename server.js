@@ -5,7 +5,14 @@ const mlbRoutes = require('./routes/mlb');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors());
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
+app.options('*', cors());
+
 app.use(express.json());
 
 app.get('/', (req, res) => {
