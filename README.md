@@ -1,70 +1,65 @@
-[README.md](https://github.com/user-attachments/files/26738471/README.md)
-# Infinity Sport Backend
+# Sendero Deportivo Backend v2.0
 
-API proxy para MLB Stats + motor de numerología deportiva.
+MLB Numerology Engine — ESPN data + PostgreSQL + Numerology
 
 ## Stack
 - Node.js + Express
-- node-cache (cache en memoria, 1h para stats, 24h para info)
-- MLB Stats API (statsapi.mlb.com) — pública, sin auth
+- PostgreSQL (Railway)
+- ESPN API (no auth needed)
+- node-cron (auto-sync every hour)
+
+## Setup en Railway
+
+### 1. Crear PostgreSQL en Railway
+1. Railway dashboard → New Project → Add PostgreSQL
+2. Copiar `DATABASE_URL` de las variables
+
+### 2. Deploy el backend
+1. Nuevo repo GitHub: `sendero-backend`
+2. Push este código
+3. Railway → New Service → GitHub repo
+4. Agregar variable de entorno: `DATABASE_URL` = (la de tu PostgreSQL)
+5. Deploy
+
+### 3. Inicializar la DB
+Una vez deployado, llama a:
+```
+POST https://TU-URL.railway.app/api/sync/today
+```
+
+O desde Railway terminal:
+```bash
+node db/init.js
+```
+
+### 4. Cargar histórico 2025
+```
+POST https://TU-URL.railway.app/api/sync/season?season=2025
+```
+Tarda ~5-10 min, corre en background.
 
 ## Endpoints
 
-| Método | Ruta | Parámetros |
-|--------|------|-----------|
-| GET | `/api/mlb/schedule` | `teamId`, `season` |
-| GET | `/api/mlb/player/stats` | `playerId`, `season`, `group` (hitting\|pitching) |
-| GET | `/api/mlb/player/info` | `playerId` |
-| GET | `/api/mlb/team/roster` | `teamId`, `season` |
-| GET | `/api/mlb/standings` | `season` |
+| Endpoint | Descripción |
+|---|---|
+| `GET /api/teams` | Todos los equipos con manager |
+| `GET /api/teams/:id` | Equipo específico |
+| `GET /api/players?teamId=LAD` | Jugadores por equipo |
+| `GET /api/analysis/today` | Vibración de todos los managers hoy |
+| `GET /api/analysis/manager?teamId=LAD&season=2025` | W/L por vibración |
+| `GET /api/analysis/player?playerId=1&season=2025` | Stats por vibración |
+| `GET /api/analysis/vs?teamA=LAD&teamB=CLE&season=2025` | Head to head |
+| `GET /api/analysis/calendar?teamId=LAD&year=2025&month=5` | Mes completo |
+| `POST /api/sync/today` | Sync juegos de hoy |
+| `POST /api/sync/date?date=2025-05-17` | Sync fecha específica |
+| `POST /api/sync/season?season=2025` | Sync temporada completa |
+| `GET /api/sync/status` | Ver qué está sincronizado |
 
-## Deploy en Railway
+## Numerología
+- Solo del 1 al 9 — sin números maestros
+- `vibrationPerson(birthDate, gameDate)` = reduce(sum(birth) + sum(date))
+- `destinyNumber(birthDate)` = reduce(y + m + d)
+- `vibrationDay(date)` = reduce(y + m + d) de la fecha
 
-1. Crear repo en GitHub: `infinity-sport-backend`
-2. Push este código
-3. En Railway → New Project → Deploy from GitHub repo
-4. Seleccionar el repo
-5. Railway detecta Node automáticamente y usa `npm start`
-6. Listo — URL tipo: `infinity-sport-backend-production.up.railway.app`
-
-## Local
-
-```bash
-npm install
-npm run dev
-```
-
-## MLB Team IDs
-
-| ID | Equipo |
-|----|--------|
-| 108 | LA Angels |
-| 109 | Arizona |
-| 110 | Baltimore |
-| 111 | Boston |
-| 112 | Chicago Cubs |
-| 113 | Cincinnati |
-| 114 | Cleveland |
-| 115 | Colorado |
-| 116 | Detroit |
-| 117 | Houston |
-| 118 | Kansas City |
-| 119 | LA Dodgers |
-| 120 | Washington |
-| 121 | NY Mets |
-| 133 | Oakland |
-| 134 | Pittsburgh |
-| 135 | San Diego |
-| 136 | Seattle |
-| 137 | San Francisco |
-| 138 | St. Louis |
-| 139 | Tampa Bay |
-| 140 | Texas |
-| 141 | Toronto |
-| 142 | Minnesota |
-| 143 | Philadelphia |
-| 144 | Atlanta |
-| 145 | Chicago White Sox |
-| 146 | Miami |
-| 147 | NY Yankees |
-| 158 | Milwaukee |
+## Auto-sync
+El backend sincroniza los juegos de hoy automáticamente cada hora via cron.
