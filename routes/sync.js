@@ -35,10 +35,9 @@ router.post('/season', async (req, res) => {
 router.get('/status', async (req, res) => {
   try {
     const pool = require('../db/index');
-    const { rows } = await pool.query(`
-      SELECT season, COUNT(*) as games, MAX(date) as last_game
-      FROM games GROUP BY season ORDER BY season DESC
-    `);
+    const { rows } = await pool.query(
+      'SELECT season, COUNT(*) as games, MAX(date) as last_game FROM games GROUP BY season ORDER BY season DESC'
+    );
     res.json({ synced: rows });
   } catch(e) {
     res.status(500).json({ error: e.message });
