@@ -1,29 +1,15 @@
 function reduce(n) {
-  while (n > 9) {
-    n = String(n).split('').reduce((a, d) => a + parseInt(d), 0);
-  }
-  return n;
+  n = Math.abs(Math.round(n));
+  while (n > 9) { n = String(n).split('').reduce((a,d)=>a+parseInt(d),0); }
+  return n===0?1:n;
 }
-
-function destinyNumber(birthDate) {
-  if (!birthDate) return 1;
-  const str = String(birthDate).split('T')[0].replace(/-/g,'');
-  return reduce(str.split('').reduce((a,d)=>a+parseInt(d),0));
+function sumDigits(str) {
+  return String(str).split('T')[0].replace(/\D/g,'').split('').reduce((a,d)=>a+parseInt(d),0);
 }
-
-function vibrationDay(date) {
-  if (!date) return 1;
-  const str = String(date).split('T')[0].replace(/-/g,'');
-  return reduce(str.split('').reduce((a,d)=>a+parseInt(d),0));
+function destinyNumber(birthDate) { if(!birthDate)return 1; return reduce(sumDigits(birthDate)); }
+function vibrationDay(date) { if(!date)return 1; return reduce(sumDigits(date)); }
+function vibrationPerson(birthDate,targetDate) {
+  if(!birthDate||!targetDate)return 1;
+  return reduce(sumDigits(birthDate)+sumDigits(targetDate));
 }
-
-function vibrationPerson(birthDate, targetDate) {
-  if (!birthDate || !targetDate) return 1;
-  const bStr = String(birthDate).split('T')[0].replace(/-/g,'');
-  const tStr = String(targetDate).split('T')[0].replace(/-/g,'');
-  const bSum = bStr.split('').reduce((a,d)=>a+parseInt(d),0);
-  const tSum = tStr.split('').reduce((a,d)=>a+parseInt(d),0);
-  return reduce(bSum + tSum);
-}
-
-module.exports = { reduce, destinyNumber, vibrationDay, vibrationPerson };
+module.exports={reduce,destinyNumber,vibrationDay,vibrationPerson};
