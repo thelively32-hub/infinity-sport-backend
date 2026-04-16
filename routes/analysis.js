@@ -1,6 +1,17 @@
 const router = require('express').Router();
 const pool = require('../db/index');
-const { vibrationPerson, vibrationDay, destinyNumber } = require('../numerology');
+const { vibrationPerson, vibrationDay } = require('../numerology');
+
+function parseDate(d) {
+  if (!d) return null;
+  return d instanceof Date ? d.toISOString().split('T')[0] : String(d).split('T')[0];
+}
+
+function safeVib(birth, date) {
+  const v = vibrationPerson(birth, date);
+  if (!v || v < 1 || v > 9) return null;
+  return v;
+}
 
 // ── GET /api/analysis/manager?teamId=LAD&season=2025 ──────
 router.get('/manager', async (req, res) => {
@@ -16,7 +27,7 @@ router.get('/manager', async (req, res) => {
     const mgr = mgrs[0];
 
     const { rows: games } = await pool.query(`
-      SELECT g.date, g.winner, g.team_home, g.team_away, g.score_home, g.score_away
+      SELECT g.date, g.winner, g.team_home, g.team_away
       FROM games g
       WHERE (g.team_home = $1 OR g.team_away = $1)
         AND g.season = $2 AND g.status = 'final'
@@ -26,14 +37,15 @@ router.get('/manager', async (req, res) => {
     const stats = {};
     for (let v = 1; v <= 9; v++) stats[v] = { G: 0, W: 0, L: 0 };
 
-   for (const g of games) {
-  const gameDate = g.date instanceof Date ? g.date.toISOString().split('T')[0] : String(g.date).split('T')[0];
-  const v = vibrationPerson(mgr.birth_date, gameDate);
-  if (!v || v < 1 || v > 9) continue;
-  const won = g.winner === teamId.toUpperCase();
-  stats[v].G++;
-  won ? stats[v].W++ : stats[v].L++;
-}
+    for (const g of games) {
+      const gameDate = parseDate(g.date);
+      if (!gameDate) continue;
+      const v = safeVib(mgr.birth_date, gameDate);
+      if (!v) continue;
+      const won = g.winner === teamId.toUpperCase();
+      stats[v].G++;
+      won ? stats[v].W++ : stats[v].L++;
+    }
 
     res.json({
       manager: {
@@ -41,7 +53,7 @@ router.get('/manager', async (req, res) => {
         name: mgr.name,
         birthDate: mgr.birth_date,
         destinyNumber: mgr.destiny_number,
-        vibrationToday: vibrationPerson(mgr.birth_date, new Date().toISOString().split('T')[0]),
+        vibrationToday: safeVib(mgr.birth_date, new Date().toISOString().split('T')[0]) || 1,
       },
       season: parseInt(season),
       totalGames: games.length,
@@ -63,14 +75,12 @@ router.get('/player', async (req, res) => {
     const player = ps[0];
     const isPitcher = ['SP','RP','P'].includes(player.position || '');
 
-    const { rows: gamestats } = await pool.query(`
-      SELECT g.date, ps.hits, ps.rbi, ps.runs, ps.hr, ps.strikeouts,
-             ps.wins, ps.losses, ps.so_pitcher, ps.at_bats
-      FROM player_stats ps
-      JOIN games g ON ps.game_id = g.id
-      WHERE ps.player_id = $1 AND g.season = $2
-      ORDER BY g.date
-    `, [parseInt(playerId), parseInt(season)]);
+    // Fetch directly from MLB Stats API
+    const group = isPitcher ? 'pitching' : 'hitting';
+    const mlbUrl = `https://statsapi.mlb.com/api/v1/people/${player.mlb_id}/stats?stats=gameLog&season=${season}&group=${group}&sportId=1`;
+    const mlbRes = await fetch(mlbUrl);
+    const mlbData = await mlbRes.json();
+    const splits = mlbData.stats?.[0]?.splits || [];
 
     const stats = {};
     for (let v = 1; v <= 9; v++) {
@@ -79,21 +89,22 @@ router.get('/player', async (req, res) => {
         : { G: 0, H: 0, HR: 0, RBI: 0, K: 0, R: 0, AB: 0 };
     }
 
-    for (const gs of gamestats) {
-      const d = gs.date instanceof Date ? gs.date.toISOString().split('T')[0] : String(gs.date).split('T')[0];
-      const v = vibrationPerson(player.birth_date, d);
+    for (const s of splits) {
+      if (!s.date) continue;
+      const v = safeVib(player.birth_date, s.date);
+      if (!v) continue;
       stats[v].G++;
       if (isPitcher) {
-        stats[v].W  += gs.wins || 0;
-        stats[v].L  += gs.losses || 0;
-        stats[v].SO += gs.so_pitcher || 0;
+        stats[v].W  += s.stat?.wins || 0;
+        stats[v].L  += s.stat?.losses || 0;
+        stats[v].SO += s.stat?.strikeOuts || 0;
       } else {
-        stats[v].H   += gs.hits || 0;
-        stats[v].HR  += gs.hr || 0;
-        stats[v].RBI += gs.rbi || 0;
-        stats[v].K   += gs.strikeouts || 0;
-        stats[v].R   += gs.runs || 0;
-        stats[v].AB  += gs.at_bats || 0;
+        stats[v].H   += s.stat?.hits || 0;
+        stats[v].HR  += s.stat?.homeRuns || 0;
+        stats[v].RBI += s.stat?.rbi || 0;
+        stats[v].K   += s.stat?.strikeOuts || 0;
+        stats[v].R   += s.stat?.runs || 0;
+        stats[v].AB  += s.stat?.atBats || 0;
       }
     }
 
@@ -105,10 +116,10 @@ router.get('/player', async (req, res) => {
         birthDate: player.birth_date,
         destinyNumber: player.destiny_number,
         isPitcher,
-        vibrationToday: vibrationPerson(player.birth_date, new Date().toISOString().split('T')[0]),
+        vibrationToday: safeVib(player.birth_date, new Date().toISOString().split('T')[0]) || 1,
       },
       season: parseInt(season),
-      totalGames: gamestats.length,
+      totalGames: splits.length,
       stats,
     });
   } catch(e) {
@@ -127,7 +138,7 @@ router.get('/vs', async (req, res) => {
     if (!mgrA.length || !mgrB.length) return res.status(404).json({ error: 'Manager not found' });
 
     const { rows: games } = await pool.query(`
-      SELECT g.date, g.winner, g.score_home, g.score_away, g.team_home, g.team_away
+      SELECT g.date, g.winner, g.team_home, g.team_away
       FROM games g
       WHERE ((g.team_home=$1 AND g.team_away=$2) OR (g.team_home=$2 AND g.team_away=$1))
         AND g.season=$3 AND g.status='final'
@@ -141,9 +152,11 @@ router.get('/vs', async (req, res) => {
     }
 
     for (const g of games) {
-      const d = g.date instanceof Date ? g.date.toISOString().split('T')[0] : String(g.date).split('T')[0];
-      const vA = vibrationPerson(mgrA[0].birth_date, d);
-      const vB = vibrationPerson(mgrB[0].birth_date, d);
+      const d = parseDate(g.date);
+      if (!d) continue;
+      const vA = safeVib(mgrA[0].birth_date, d);
+      const vB = safeVib(mgrB[0].birth_date, d);
+      if (!vA || !vB) continue;
       const wonA = g.winner === teamA.toUpperCase();
       statsA[vA].G++; wonA ? statsA[vA].W++ : statsA[vA].L++;
       statsB[vB].G++; wonA ? statsB[vB].L++ : statsB[vB].W++;
@@ -177,7 +190,7 @@ router.get('/today', async (req, res) => {
       teamName: m.team_name,
       abbr: m.abbr,
       manager: m.name,
-      vibrationToday: vibrationPerson(m.birth_date, today),
+      vibrationToday: safeVib(m.birth_date, today) || 1,
       destinyNumber: m.destiny_number,
     }));
     res.json({ date: today, vibrationDay: vDay, teams });
