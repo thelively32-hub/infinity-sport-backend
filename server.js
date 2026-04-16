@@ -15,7 +15,7 @@ app.use('/api/players',  require('./routes/players'));
 app.use('/api/games',    require('./routes/games'));
 app.use('/api/analysis', require('./routes/analysis'));
 app.use('/api/sync',     require('./routes/sync'));
-
+app.use('/api/mlb', require('./routes/mlb'));
 app.get('/', (req, res) => {
   res.json({ app: 'Sendero Deportivo Backend', version: '2.0.0', status: 'running' });
 });
