@@ -7,24 +7,23 @@ function reduce(n) {
 
 function destinyNumber(birthDate) {
   if (!birthDate) return 1;
-  const [y, m, d] = String(birthDate).split('T')[0].split('-').map(Number);
-  if (!y || !m || !d) return 1;
-  return reduce(y + m + d);
+  const str = String(birthDate).split('T')[0].replace(/-/g,'');
+  return reduce(str.split('').reduce((a,d)=>a+parseInt(d),0));
 }
 
 function vibrationDay(date) {
   if (!date) return 1;
-  const [y, m, d] = String(date).split('T')[0].split('-').map(Number);
-  if (!y) return 1;
-  return reduce(y + m + d);
+  const str = String(date).split('T')[0].replace(/-/g,'');
+  return reduce(str.split('').reduce((a,d)=>a+parseInt(d),0));
 }
 
 function vibrationPerson(birthDate, targetDate) {
   if (!birthDate || !targetDate) return 1;
-  const [by, bm, bd] = String(birthDate).split('T')[0].split('-').map(Number);
-  const [ty, tm, td] = String(targetDate).split('T')[0].split('-').map(Number);
-  if (!by || !ty) return 1;
-  return reduce(by + bm + bd + ty + tm + td);
+  const bStr = String(birthDate).split('T')[0].replace(/-/g,'');
+  const tStr = String(targetDate).split('T')[0].replace(/-/g,'');
+  const bSum = bStr.split('').reduce((a,d)=>a+parseInt(d),0);
+  const tSum = tStr.split('').reduce((a,d)=>a+parseInt(d),0);
+  return reduce(bSum + tSum);
 }
 
 module.exports = { reduce, destinyNumber, vibrationDay, vibrationPerson };
