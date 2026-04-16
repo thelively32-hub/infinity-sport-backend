@@ -26,10 +26,10 @@ router.get('/manager', async (req, res) => {
     const stats = {};
     for (let v = 1; v <= 9; v++) stats[v] = { G: 0, W: 0, L: 0 };
 
-    for (const g of games) {
+   for (const g of games) {
   const gameDate = g.date instanceof Date ? g.date.toISOString().split('T')[0] : String(g.date).split('T')[0];
   const v = vibrationPerson(mgr.birth_date, gameDate);
-  if(games.indexOf(g) < 3) console.log('TEST:', mgr.birth_date, gameDate, v);
+  if (!v || v < 1 || v > 9) continue;
   const won = g.winner === teamId.toUpperCase();
   stats[v].G++;
   won ? stats[v].W++ : stats[v].L++;
