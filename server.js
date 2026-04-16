@@ -1,4 +1,5 @@
 const express = require('express');
+console.log('DATABASE_URL:', process.env.DATABASE_URL ? process.env.DATABASE_URL.split('@')[1] : 'NOT SET');
 const cors = require('cors');
 
 const app = express();
