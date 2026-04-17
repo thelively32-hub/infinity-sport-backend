@@ -5,6 +5,7 @@
 const router = require('express').Router();
 const pool = require('../db/index');
 const { vibrationPerson } = require('../numerology');
+const { getTeamsPlayingOn } = require('../utils/schedule');
 
 // Simple in-memory cache (key: date, value: verification result)
 const verifyCache = new Map();
@@ -34,13 +35,23 @@ async function fetchGameLog(mlbId, season, group) {
 
 // Core: compute picks for a given date + verify against actual outcomes
 async function computePicksWithVerification(targetDate) {
+  // Filter to teams that actually played on targetDate
+  const { mlbIds: playingMlbIds } = await getTeamsPlayingOn(targetDate);
+  if (!playingMlbIds.length) {
+    return {
+      date: targetDate, isHistorical: targetDate < new Date().toISOString().split('T')[0],
+      over: [], under: [],
+      summary: { overTotal: 0, overHits: 0, overAccuracy: null, underTotal: 0, underHits: 0, underAccuracy: null, totalAnalyzed: 0 },
+    };
+  }
+
   const { rows: players } = await pool.query(`
     SELECT p.*, t.name as team_name, t.abbr, t.colors
     FROM players p
     JOIN teams t ON p.team_id = t.id
-    WHERE p.season = 2026 AND p.mlb_id IS NOT NULL
+    WHERE p.season = 2026 AND p.mlb_id IS NOT NULL AND t.mlb_id = ANY($1)
     ORDER BY p.name
-  `);
+  `, [playingMlbIds]);
 
   const results = [];
   const isHistorical = targetDate < new Date().toISOString().split('T')[0];

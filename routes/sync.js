@@ -334,4 +334,84 @@ router.get('/status', async (req, res) => {
   }
 });
 
+// POST /api/sync/rosters — sync active 26-man rosters for all teams from MLB API
+// Updates players table to reflect current active rosters (trades, call-ups, etc.)
+router.post('/rosters', async (req, res) => {
+  const pool = require('../db/index');
+  const { reduce } = require('../numerology');
+  const season = parseInt(req.query.season || '2026');
+
+  res.json({ ok: true, message: `Syncing ${season} rosters in background…` });
+
+  // Run in background
+  (async () => {
+    try {
+      const { rows: teams } = await pool.query('SELECT id, mlb_id FROM teams');
+      let totalInserted = 0, totalUpdated = 0, totalRemoved = 0;
+
+      // Collect all current mlb_ids across all teams for later cleanup
+      const currentMlbIds = new Set();
+
+      for (const team of teams) {
+        try {
+          const url = `https://statsapi.mlb.com/api/v1/teams/${team.mlb_id}/roster/active?season=${season}&hydrate=person`;
+          const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
+          if (!r.ok) { console.error(`[roster-sync] ${team.id}: HTTP ${r.status}`); continue; }
+          const data = await r.json();
+          const roster = data.roster || [];
+
+          for (const p of roster) {
+            const person = p.person || {};
+            if (!person.birthDate) continue;
+            currentMlbIds.add(person.id);
+
+            const [y,m,d] = person.birthDate.split('-').map(Number);
+            const destinyNum = reduce(y + m + d);
+            const posAbbr = p.position?.abbreviation || person.primaryPosition?.abbreviation || '';
+
+            // Check if player exists (by mlb_id for this season)
+            const existing = await pool.query(
+              'SELECT id, team_id, position FROM players WHERE mlb_id = $1 AND season = $2',
+              [person.id, season]
+            );
+
+            if (existing.rows.length === 0) {
+              await pool.query(`
+                INSERT INTO players (team_id, name, birth_date, destiny_number, position, mlb_id, season)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+              `, [team.id, person.fullName, person.birthDate, destinyNum, posAbbr, person.id, season]);
+              totalInserted++;
+            } else {
+              const ex = existing.rows[0];
+              if (ex.team_id !== team.id || ex.position !== posAbbr) {
+                await pool.query(`
+                  UPDATE players SET team_id = $1, position = $2, name = $3, birth_date = $4, destiny_number = $5
+                  WHERE id = $6
+                `, [team.id, posAbbr, person.fullName, person.birthDate, destinyNum, ex.id]);
+                totalUpdated++;
+              }
+            }
+          }
+          console.log(`[roster-sync] ${team.id}: ${roster.length} players synced`);
+        } catch(e) {
+          console.error(`[roster-sync] ${team.id} error:`, e.message);
+        }
+      }
+
+      // Remove players no longer on any active roster for this season
+      if (currentMlbIds.size > 0) {
+        const result = await pool.query(
+          `DELETE FROM players WHERE season = $1 AND mlb_id IS NOT NULL AND NOT (mlb_id = ANY($2))`,
+          [season, [...currentMlbIds]]
+        );
+        totalRemoved = result.rowCount || 0;
+      }
+
+      console.log(`[roster-sync] ✅ DONE · inserted:${totalInserted} updated:${totalUpdated} removed:${totalRemoved}`);
+    } catch(e) {
+      console.error('[roster-sync] fatal:', e.message);
+    }
+  })();
+});
+
 module.exports = router;

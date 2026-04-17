@@ -13,6 +13,7 @@ app.use(express.json());
 app.use('/api/today',    require('./routes/today'));
 app.use('/api/verify',   require('./routes/verify'));
 app.use('/api/accuracy', require('./routes/accuracy'));
+app.use('/api/schedule', require('./routes/schedule'));
 app.use('/api/teams',    require('./routes/teams'));
 app.use('/api/players',  require('./routes/players'));
 app.use('/api/games',    require('./routes/games'));

@@ -1,17 +1,28 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db/index');
+const { getTeamsPlayingOn } = require('../utils/schedule');
 
+// GET /api/players?teamId=LAD&playingDate=YYYY-MM-DD
 router.get('/', async (req, res) => {
   try {
-    const { teamId } = req.query;
-    let q = 'SELECT * FROM players WHERE 1=1';
+    const { teamId, playingDate } = req.query;
+    let q = `SELECT p.*, t.mlb_id as team_mlb_id, t.abbr as team_abbr, t.name as team_name FROM players p JOIN teams t ON p.team_id = t.id WHERE 1=1`;
     const params = [];
+
     if (teamId) {
       params.push(teamId.toUpperCase());
-      q += ` AND team_id = $${params.length}`;
+      q += ` AND p.team_id = $${params.length}`;
     }
-    q += ' ORDER BY name';
+
+    if (playingDate) {
+      const { mlbIds } = await getTeamsPlayingOn(playingDate);
+      if (mlbIds.length === 0) return res.json([]);
+      params.push(mlbIds);
+      q += ` AND t.mlb_id = ANY($${params.length})`;
+    }
+
+    q += ' ORDER BY p.name';
     const { rows } = await pool.query(q, params);
     res.json(rows);
   } catch(e) {

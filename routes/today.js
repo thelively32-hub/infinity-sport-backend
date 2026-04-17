@@ -4,22 +4,50 @@
 const router = require('express').Router();
 const pool = require('../db/index');
 const { vibrationPerson, vibrationDay } = require('../numerology');
+const { getTeamsPlayingOn } = require('../utils/schedule');
 
 // GET /api/today
-// Returns vibration of the day + top OVER and UNDER players
+// Returns vibration of the day + top OVER and UNDER players (from teams playing today)
 router.get('/', async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
     const vDay = vibrationDay(today);
 
-    // Get all players with their team info
-    const { rows: players } = await pool.query(`
-      SELECT p.*, t.name as team_name, t.abbr, t.colors
-      FROM players p
-      JOIN teams t ON p.team_id = t.id
-      WHERE p.season = 2026 AND p.mlb_id IS NOT NULL
-      ORDER BY p.name
-    `);
+    // Filter to only teams with games today (unless includeAll=true)
+    const includeAll = req.query.includeAll === 'true';
+    let playerQuery, queryParams;
+    let playingTeams = [];
+    if (!includeAll) {
+      const { mlbIds } = await getTeamsPlayingOn(today);
+      if (!mlbIds.length) {
+        return res.json({
+          date: today, vibrationDay: vDay,
+          totalAnalyzed: 0, over: [], under: [],
+          note: 'No MLB games scheduled today',
+        });
+      }
+      playerQuery = `
+        SELECT p.*, t.name as team_name, t.abbr, t.colors
+        FROM players p
+        JOIN teams t ON p.team_id = t.id
+        WHERE p.season = 2026 AND p.mlb_id IS NOT NULL AND t.mlb_id = ANY($1)
+        ORDER BY p.name
+      `;
+      queryParams = [mlbIds];
+      const { rows: teams } = await pool.query('SELECT id FROM teams WHERE mlb_id = ANY($1)', [mlbIds]);
+      playingTeams = teams.map(t => t.id);
+    } else {
+      playerQuery = `
+        SELECT p.*, t.name as team_name, t.abbr, t.colors
+        FROM players p
+        JOIN teams t ON p.team_id = t.id
+        WHERE p.season = 2026 AND p.mlb_id IS NOT NULL
+        ORDER BY p.name
+      `;
+      queryParams = [];
+    }
+
+    const { rows: players } = await pool.query(playerQuery, queryParams);
 
     const results = [];
 
@@ -130,6 +158,7 @@ router.get('/', async (req, res) => {
       date: today,
       vibrationDay: vDay,
       totalAnalyzed: results.length,
+      playingTeams: playingTeams.length,
       over,
       under,
     });
