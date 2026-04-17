@@ -5,12 +5,12 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use('/api/today', require('./routes/today'));
 app.use(cors({ origin: '*', methods: ['GET','POST','OPTIONS'], allowedHeaders: '*' }));
 app.options('*', (req, res) => { res.header('Access-Control-Allow-Origin','*'); res.sendStatus(204); });
 app.use((req,res,next)=>{ res.header('Access-Control-Allow-Origin','*'); next(); });
 app.use(express.json());
 
+app.use('/api/today',    require('./routes/today'));
 app.use('/api/teams',    require('./routes/teams'));
 app.use('/api/players',  require('./routes/players'));
 app.use('/api/games',    require('./routes/games'));
