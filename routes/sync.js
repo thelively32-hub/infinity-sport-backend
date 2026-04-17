@@ -441,12 +441,12 @@ router.post('/rosters', async (req, res) => {
   })();
 });
 
-// POST /api/sync/cleanup-dups — aggressively dedupe players by mlb_id
+// POST /api/sync/cleanup-dups — aggressively dedupe players + remove stale players
 router.post('/cleanup-dups', async (req, res) => {
   const pool = require('../db/index');
   const season = parseInt(req.query.season || '2026');
   try {
-    // Step 1: find duplicate mlb_ids, get all duplicate IDs (except latest)
+    // === Step 1: Dedupe by mlb_id (keep latest) ===
     const { rows: dups } = await pool.query(`
       SELECT id FROM players p1
       WHERE season = $1 AND mlb_id IS NOT NULL
@@ -454,27 +454,49 @@ router.post('/cleanup-dups', async (req, res) => {
           SELECT MAX(id) FROM players WHERE season = $1 AND mlb_id = p1.mlb_id
         )
     `, [season]);
-
-    if (dups.length === 0) {
-      return res.json({ ok: true, cleaned: 0, message: 'No duplicates found' });
+    let dupDeleted = 0;
+    if (dups.length > 0) {
+      const ids = dups.map(d => d.id);
+      await pool.query('DELETE FROM player_stats WHERE player_id = ANY($1)', [ids]);
+      const r = await pool.query('DELETE FROM players WHERE id = ANY($1)', [ids]);
+      dupDeleted = r.rowCount;
     }
 
-    const idsToDelete = dups.map(d => d.id);
-
-    // Step 2: delete player_stats referencing those IDs
-    await pool.query('DELETE FROM player_stats WHERE player_id = ANY($1)', [idsToDelete]);
-    // Step 3: delete the player rows
-    const result = await pool.query('DELETE FROM players WHERE id = ANY($1)', [idsToDelete]);
-
-    // Step 4: delete any players with NULL mlb_id (leftover from seed)
+    // === Step 2: Remove NULL mlb_id players ===
     await pool.query('DELETE FROM player_stats WHERE player_id IN (SELECT id FROM players WHERE season = $1 AND mlb_id IS NULL)', [season]);
-    const nullResult = await pool.query('DELETE FROM players WHERE season = $1 AND mlb_id IS NULL', [season]);
+    const nullR = await pool.query('DELETE FROM players WHERE season = $1 AND mlb_id IS NULL', [season]);
+
+    // === Step 3: Fetch all active MLB mlb_ids, remove stale ones ===
+    const { rows: teams } = await pool.query('SELECT mlb_id FROM teams');
+    const activeIds = new Set();
+    await Promise.all(teams.map(async t => {
+      try {
+        const r = await fetch(`https://statsapi.mlb.com/api/v1/teams/${t.mlb_id}/roster/active?season=${season}`, { signal: AbortSignal.timeout(8000) });
+        if (!r.ok) return;
+        const d = await r.json();
+        (d.roster||[]).forEach(p => {
+          if (p.person?.id) activeIds.add(p.person.id);
+        });
+      } catch(e) { /* skip */ }
+    }));
+
+    let staleDeleted = 0;
+    if (activeIds.size > 100) {
+      await pool.query(`DELETE FROM player_stats WHERE player_id IN (SELECT id FROM players WHERE season = $1 AND NOT (mlb_id = ANY($2)))`, [season, [...activeIds]]);
+      const r = await pool.query(`DELETE FROM players WHERE season = $1 AND NOT (mlb_id = ANY($2))`, [season, [...activeIds]]);
+      staleDeleted = r.rowCount;
+    }
+
+    // Final count
+    const { rows: [cnt] } = await pool.query('SELECT COUNT(*)::int as n FROM players WHERE season = $1', [season]);
 
     res.json({
       ok: true,
-      duplicatesRemoved: result.rowCount,
-      nullMlbIdsRemoved: nullResult.rowCount,
-      total: (result.rowCount||0) + (nullResult.rowCount||0),
+      duplicatesRemoved: dupDeleted,
+      nullMlbIdsRemoved: nullR.rowCount,
+      staleRemoved: staleDeleted,
+      activeRosterSize: activeIds.size,
+      remaining: cnt.n,
     });
   } catch(e) {
     res.status(500).json({ error: e.message });
