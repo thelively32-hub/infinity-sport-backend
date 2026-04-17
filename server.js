@@ -11,6 +11,8 @@ app.use((req,res,next)=>{ res.header('Access-Control-Allow-Origin','*'); next();
 app.use(express.json());
 
 app.use('/api/today',    require('./routes/today'));
+app.use('/api/verify',   require('./routes/verify'));
+app.use('/api/accuracy', require('./routes/accuracy'));
 app.use('/api/teams',    require('./routes/teams'));
 app.use('/api/players',  require('./routes/players'));
 app.use('/api/games',    require('./routes/games'));
