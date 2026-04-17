@@ -441,4 +441,44 @@ router.post('/rosters', async (req, res) => {
   })();
 });
 
+// POST /api/sync/cleanup-dups — aggressively dedupe players by mlb_id
+router.post('/cleanup-dups', async (req, res) => {
+  const pool = require('../db/index');
+  const season = parseInt(req.query.season || '2026');
+  try {
+    // Step 1: find duplicate mlb_ids, get all duplicate IDs (except latest)
+    const { rows: dups } = await pool.query(`
+      SELECT id FROM players p1
+      WHERE season = $1 AND mlb_id IS NOT NULL
+        AND id NOT IN (
+          SELECT MAX(id) FROM players WHERE season = $1 AND mlb_id = p1.mlb_id
+        )
+    `, [season]);
+
+    if (dups.length === 0) {
+      return res.json({ ok: true, cleaned: 0, message: 'No duplicates found' });
+    }
+
+    const idsToDelete = dups.map(d => d.id);
+
+    // Step 2: delete player_stats referencing those IDs
+    await pool.query('DELETE FROM player_stats WHERE player_id = ANY($1)', [idsToDelete]);
+    // Step 3: delete the player rows
+    const result = await pool.query('DELETE FROM players WHERE id = ANY($1)', [idsToDelete]);
+
+    // Step 4: delete any players with NULL mlb_id (leftover from seed)
+    await pool.query('DELETE FROM player_stats WHERE player_id IN (SELECT id FROM players WHERE season = $1 AND mlb_id IS NULL)', [season]);
+    const nullResult = await pool.query('DELETE FROM players WHERE season = $1 AND mlb_id IS NULL', [season]);
+
+    res.json({
+      ok: true,
+      duplicatesRemoved: result.rowCount,
+      nullMlbIdsRemoved: nullResult.rowCount,
+      total: (result.rowCount||0) + (nullResult.rowCount||0),
+    });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;
