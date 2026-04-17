@@ -346,6 +346,25 @@ router.post('/rosters', async (req, res) => {
   // Run in background
   (async () => {
     try {
+      // First: remove duplicate entries (same mlb_id, keep latest inserted)
+      try {
+        await pool.query(`
+          DELETE FROM player_stats ps USING players p
+          WHERE ps.player_id = p.id AND p.season = $1 AND p.id IN (
+            SELECT a.id FROM players a JOIN players b
+              ON a.mlb_id = b.mlb_id AND a.season = b.season AND a.id < b.id
+            WHERE a.season = $1
+          )
+        `, [season]);
+        const dupDel = await pool.query(`
+          DELETE FROM players a USING players b
+          WHERE a.id < b.id AND a.mlb_id = b.mlb_id AND a.season = b.season AND a.season = $1
+        `, [season]);
+        console.log(`[roster-sync] cleaned duplicates: ${dupDel.rowCount||0}`);
+      } catch(e) {
+        console.error('[roster-sync] dedup error:', e.message);
+      }
+
       const { rows: teams } = await pool.query('SELECT id, mlb_id FROM teams');
       let totalInserted = 0, totalUpdated = 0, totalRemoved = 0;
 
@@ -371,7 +390,7 @@ router.post('/rosters', async (req, res) => {
 
             // Check if player exists (by mlb_id for this season)
             const existing = await pool.query(
-              'SELECT id, team_id, position FROM players WHERE mlb_id = $1 AND season = $2',
+              'SELECT id, team_id, position FROM players WHERE mlb_id = $1 AND season = $2 LIMIT 1',
               [person.id, season]
             );
 
@@ -383,13 +402,11 @@ router.post('/rosters', async (req, res) => {
               totalInserted++;
             } else {
               const ex = existing.rows[0];
-              if (ex.team_id !== team.id || ex.position !== posAbbr) {
-                await pool.query(`
-                  UPDATE players SET team_id = $1, position = $2, name = $3, birth_date = $4, destiny_number = $5
-                  WHERE id = $6
-                `, [team.id, posAbbr, person.fullName, person.birthDate, destinyNum, ex.id]);
-                totalUpdated++;
-              }
+              await pool.query(`
+                UPDATE players SET team_id = $1, position = $2, name = $3, birth_date = $4, destiny_number = $5
+                WHERE id = $6
+              `, [team.id, posAbbr, person.fullName, person.birthDate, destinyNum, ex.id]);
+              totalUpdated++;
             }
           }
           console.log(`[roster-sync] ${team.id}: ${roster.length} players synced`);
@@ -400,11 +417,21 @@ router.post('/rosters', async (req, res) => {
 
       // Remove players no longer on any active roster for this season
       if (currentMlbIds.size > 0) {
-        const result = await pool.query(
-          `DELETE FROM players WHERE season = $1 AND mlb_id IS NOT NULL AND NOT (mlb_id = ANY($2))`,
-          [season, [...currentMlbIds]]
-        );
-        totalRemoved = result.rowCount || 0;
+        try {
+          // First remove FK references
+          await pool.query(`
+            DELETE FROM player_stats ps USING players p
+            WHERE ps.player_id = p.id AND p.season = $1
+              AND (p.mlb_id IS NULL OR NOT (p.mlb_id = ANY($2)))
+          `, [season, [...currentMlbIds]]);
+          const result = await pool.query(
+            `DELETE FROM players WHERE season = $1 AND (mlb_id IS NULL OR NOT (mlb_id = ANY($2)))`,
+            [season, [...currentMlbIds]]
+          );
+          totalRemoved = result.rowCount || 0;
+        } catch(e) {
+          console.error('[roster-sync] cleanup error:', e.message);
+        }
       }
 
       console.log(`[roster-sync] ✅ DONE · inserted:${totalInserted} updated:${totalUpdated} removed:${totalRemoved}`);
